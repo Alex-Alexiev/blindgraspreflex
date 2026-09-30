@@ -157,10 +157,6 @@ def _train(args) -> int:
             "0.6,2.0,0.15,0.45",
             "--hand-gain-dr",
             "0.1,1.5,0.3,1.5",
-            "--video-every",
-            str(training["video_every"]),
-            "--video-seconds",
-            str(training["video_seconds"]),
         ]
         return _run_module(main, arguments)
 
@@ -208,16 +204,6 @@ def _train(args) -> int:
         "--disturbance-angvel",
         "0.9",
     ]
-    if int(training["video_every"]) > 0:
-        arguments.extend(
-            [
-                "--video",
-                "--video-interval",
-                str(training["video_every"]),
-                "--video-length",
-                str(max(1, round(float(training["video_seconds"]) / (0.004 * 21)))),
-            ]
-        )
     return _run_module(main, arguments)
 
 
@@ -225,19 +211,24 @@ def _play(args) -> int:
     config = _load_config(args.config)
     _configure_process(config)
     viewer = config["viewer"]
+    paths = config["paths"]
     from blindgraspreflex.play import main
+
+    if getattr(args, "checkpoint_root", None) is not None:
+        source = ["--run-dir", args.checkpoint_root]
+    elif getattr(args, "serve", False):
+        source = ["--run-dir", str(Path(paths["logs"]) / args.kind)]
+    else:
+        source = ["--checkpoint", args.checkpoint]
 
     arguments = [
         "--task",
         "Reflexive-Grasp-YCB-All",
-        "--checkpoint",
-        args.checkpoint,
+        *source,
         "--device",
         viewer["device"],
         "--port",
         str(viewer["port"]),
-        "--num-envs",
-        str(viewer["num_envs"]),
         "--hand-mode",
         "joints",
         "--hand-pca-project",
@@ -292,6 +283,17 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--checkpoint", required=True)
     play.add_argument("--kind", choices=("teacher", "student"), default="student")
 
+    serve = commands.add_parser(
+        "serve", help="Watch training checkpoints and select policies and objects in Viser."
+    )
+    serve.add_argument("--config", default="configs/local.toml")
+    serve.add_argument("--kind", choices=("teacher", "student"), default="student")
+    serve.add_argument(
+        "--checkpoint-root",
+        help="Directory to watch recursively (default: <logs>/<kind> from the config).",
+    )
+    serve.set_defaults(serve=True, checkpoint=None)
+
     method = commands.add_parser("method", help="Inspect the canonical q_cmd recipe.")
     method_commands = method.add_subparsers(dest="method_command", required=True)
     method_commands.add_parser("show")
@@ -313,7 +315,7 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.command == "train":
         return _train(args)
-    if args.command == "play":
+    if args.command in ("play", "serve"):
         return _play(args)
     if args.command == "method":
         print(json.dumps(asdict(CANONICAL_METHOD), indent=2))

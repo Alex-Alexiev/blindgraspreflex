@@ -3,18 +3,19 @@
 Two modes:
 
 * ``--checkpoint model_200.pt``  -- load one checkpoint.
-* ``--run-dir logs/grasp_run4``  -- browse every checkpoint in the run from a dropdown in
-  the viewer's Checkpoints tab, switching between them live.
+* ``--run-dir logs/student`` -- recursively watch every checkpoint beneath a directory and
+  switch between them live from the viewer's Checkpoints tab.
 
 The viser viewer renders one env at a time (chosen by ``env_idx``), so for the diverse-object
 task (``Reflexive-Grasp-YCB``, the default) it spawns one env per YCB object -- the same set
-training saw -- and an "environment" slider in the viewer flips between the objects live. Pass
+training saw -- and an Object dropdown flips between the objects live. Pass
 ``--task Reflexive-Grasp-Apple`` (or ``--num-envs 1``) for a single object. Runs on cuda:0 by
 default so it does not contend with a training run on cuda:1.
 """
 
 import argparse
 import os
+import time
 from collections import deque
 from dataclasses import asdict
 from pathlib import Path
@@ -28,6 +29,7 @@ from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.rl.runner import MjlabOnPolicyRunner
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 from mjlab.viewer import ViserPlayViewer
+from mjlab.viewer.base import ViewerAction
 from mjlab.viewer.viser.viewer import CheckpointManager, format_time_ago
 from rsl_rl.runners import DistillationRunner
 from scipy.spatial.transform import Rotation
@@ -57,34 +59,36 @@ class GraspViewer(ViserPlayViewer):
 
     def setup(self) -> None:
         super().setup()
+        self._next_checkpoint_scan = time.monotonic() + 2.0
         self._score_t: deque[int] = deque(maxlen=_PLOT_WINDOW)
         self._score_v: deque[float] = deque(maxlen=_PLOT_WINDOW)
         self._phase_v: deque[float] = deque(maxlen=_PLOT_WINDOW)
         # Object selector. Under per-world mesh variants each env holds a different YCB object
         # (the same set training saw), and the viser viewer renders one env at a time, so a
-        # slider over env_idx is how you flip between objects live. env i -> object name comes
+        # selector over env_idx is how you flip between objects live. env i -> object name comes
         # from the same largest-remainder allocation the variant entity uses.
         names = getattr(self, "_env_object_names", None)
         self._last_env_idx = self._scene.env_idx
-        if self.env.num_envs > 1:
+        self._object_env_indices: dict[str, int] = {}
+        if self.env.num_envs > 1 and names:
+            # Multiple worlds may contain the same object. One representative world per unique
+            # object makes the control say what a user actually wants to choose.
+            for env_idx, name in enumerate(names):
+                self._object_env_indices.setdefault(name, env_idx)
             with self._server.gui.add_folder("Object"):
-                self._object_text = self._server.gui.add_text(
-                    "object", names[self._scene.env_idx] if names else "?", disabled=True
-                )
-                self._env_slider = self._server.gui.add_slider(
-                    "environment",
-                    min=0,
-                    max=self.env.num_envs - 1,
-                    step=1,
-                    initial_value=self._scene.env_idx,
+                current_name = names[self._scene.env_idx]
+                self._object_dropdown = self._server.gui.add_dropdown(
+                    "Object",
+                    options=tuple(self._object_env_indices),
+                    initial_value=current_name,
                 )
 
-                @self._env_slider.on_update
+                @self._object_dropdown.on_update
                 def _(_ev) -> None:
-                    self._scene.env_idx = int(self._env_slider.value)
+                    self._scene.env_idx = self._object_env_indices[self._object_dropdown.value]
                     self._scene.request_update()
         else:
-            self._object_text = None
+            self._object_dropdown = None
         with self._server.gui.add_folder("Policy"):
             self._phase_text = self._server.gui.add_text("phase", "REACH", disabled=True)
             self._score_plot = self._server.gui.add_uplot(
@@ -589,6 +593,11 @@ class GraspViewer(ViserPlayViewer):
 
     def sync_env_to_viewer(self) -> None:
         super().sync_env_to_viewer()
+        if self._ckpt_mgr is not None and time.monotonic() >= self._next_checkpoint_scan:
+            # Refreshing only updates the dropdown. The active policy changes solely when the
+            # user selects a checkpoint (or clicks "Use Latest").
+            self._actions.append((ViewerAction.FETCH_CHECKPOINT, "refresh"))
+            self._next_checkpoint_scan = time.monotonic() + 2.0
         term = self.env.unwrapped.action_manager.get_term("grasp")
         idx = self._scene.env_idx  # the env (hence object) currently on screen
         if idx != self._last_env_idx:
@@ -599,8 +608,8 @@ class GraspViewer(ViserPlayViewer):
             self._score_v.clear()
             self._phase_v.clear()
             names = getattr(self, "_env_object_names", None)
-            if self._object_text is not None and names:
-                self._object_text.value = names[idx]
+            if self._object_dropdown is not None and names:
+                self._object_dropdown.value = names[idx]
         phase = float(term.phase.phase[idx].item())  # 0 reach, 1 lift
         self._score_t.append(self._step_count)
         self._score_v.append(float(term.grasp_score[idx]))
@@ -709,7 +718,7 @@ class GraspViewer(ViserPlayViewer):
 
 
 def _checkpoints(run_dir: Path) -> list[Path]:
-    """Checkpoints in a run directory, sorted by training step."""
+    """Checkpoints beneath a watched root, oldest first so the final entry is latest."""
 
     def step(p: Path) -> int:
         try:
@@ -717,7 +726,10 @@ def _checkpoints(run_dir: Path) -> list[Path]:
         except (IndexError, ValueError):
             return -1
 
-    return sorted(run_dir.glob("model_*.pt"), key=step)
+    def sort_key(path: Path) -> tuple[int, int, str]:
+        return (path.stat().st_mtime_ns, step(path), path.as_posix())
+
+    return sorted(run_dir.rglob("model_*.pt"), key=sort_key)
 
 
 def _resolve_object_names(obj_cfg, num_envs: int) -> list[str] | None:
@@ -755,7 +767,7 @@ def main() -> None:
         type=int,
         default=None,
         help="Envs to spawn. Default: one per object for a variant task (so every object "
-        "appears), else 1. Use the 'environment' slider in the viewer to switch objects.",
+        "appears), else 1. Use the Object dropdown in the viewer to switch objects.",
     )
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--port", type=int, default=8080)
@@ -1002,11 +1014,11 @@ def main() -> None:
     # after the env is already built. The checkpoint is ground truth; the flag is only a fallback.
     # Both the student branch (which used to hardcode True) and the --arm-residual flag go through
     # this, so a 21-D no-residual policy plays without any extra flags.
-    from blindgraspreflex.checkpoint_introspect import latest_checkpoint, resolve_residual
+    from blindgraspreflex.checkpoint_introspect import resolve_residual
 
-    _ckpt = args.checkpoint or (latest_checkpoint(args.run_dir) if args.run_dir else None)
-    # A student's pre-refactor default was True; a teacher's is whatever --arm-residual says.
-    arm_residual = resolve_residual(_ckpt, True if args.student else args.arm_residual, tag="play")
+    _available = _checkpoints(Path(args.run_dir)) if args.run_dir else []
+    _ckpt = args.checkpoint or (_available[-1] if _available else None)
+    arm_residual = resolve_residual(_ckpt, args.arm_residual, tag="play")
 
     env_cfg = load_env_cfg(args.task, play=True)
     obj_cfg = env_cfg.scene.entities["object"]
@@ -1200,6 +1212,12 @@ def main() -> None:
             env_cfg.actions["grasp"].phase.release_radius = args.release_radius
 
     env = RslRlVecEnvWrapper(ManagerBasedRlEnv(env_cfg, device=args.device))
+    # Hide the vendor's visual-only lab cage before Viser builds fixed mesh handles. Appearance
+    # is constant here, so do not let the batched model sync restore the enclosure's alpha.
+    from blindgraspreflex.assets.mounts import hide_enclosure_geoms
+
+    hide_enclosure_geoms(env.unwrapped.sim._mj_model)
+    env.unwrapped.sim.expanded_fields.discard("geom_rgba")
 
     runner = None
 
@@ -1241,28 +1259,40 @@ def main() -> None:
         print(f"[play] {mode} mode: no checkpoint; use the viewer controls.")
     elif args.run_dir:
         run_dir = Path(args.run_dir)
-        ckpts = _checkpoints(run_dir)
-        if not ckpts:
-            p.error(f"no model_*.pt in {run_dir}")
-        latest = ckpts[-1]
+        ckpts = _available
 
         def fetch_available() -> list[tuple[str, str]]:
             found = _checkpoints(run_dir)
-            now = int(os.path.getmtime(max(found, key=os.path.getmtime)))
-            # Newest first, each labelled with how long ago it was written. Re-scans every
-            # call so checkpoints written after launch (a live training run) appear.
+            now = int(time.time())
+            # Oldest first because the viewer's "Use Latest" action selects the final entry.
+            # Re-scan every call so checkpoints written after launch appear automatically.
             return [
-                (c.name, format_time_ago(now - int(os.path.getmtime(c)))) for c in reversed(found)
+                (
+                    c.relative_to(run_dir).as_posix(),
+                    format_time_ago(max(0, now - int(c.stat().st_mtime))),
+                )
+                for c in found
             ]
 
+        if ckpts:
+            latest = ckpts[-1]
+            current_name = latest.relative_to(run_dir).as_posix()
+            policy = load(str(latest))
+            print(f"[play] watching {run_dir} recursively; latest {current_name}")
+        else:
+            current_name = "Waiting for first checkpoint..."
+            action_dim = env.unwrapped.action_manager.total_action_dim
+            policy = lambda obs: torch.zeros(  # noqa: E731
+                env.num_envs, action_dim, device=args.device
+            )
+            print(f"[play] watching {run_dir} recursively; waiting for model_*.pt")
+
         ckpt_mgr = CheckpointManager(
-            current_name=latest.name,
+            current_name=current_name,
             fetch_available=fetch_available,
             load_checkpoint=lambda name: load(str(run_dir / name)),
             run_name=run_dir.name,
         )
-        policy = load(str(latest))
-        print(f"[play] browsing {len(ckpts)} checkpoints in {run_dir}; latest {latest.name}")
     else:
         policy = load(args.checkpoint)
         print(f"[play] checkpoint {args.checkpoint}")
@@ -1270,7 +1300,7 @@ def main() -> None:
     if env_object_names is not None:
         shown = ", ".join(dict.fromkeys(env_object_names))
         print(f"[play] {args.num_envs} envs across {len(set(env_object_names))} objects: {shown}")
-        print("[play] use the 'environment' slider in the viewer to switch object")
+        print("[play] use the Object dropdown in the viewer to switch object")
 
     print(f"[play] open http://localhost:{args.port}")
     viewer = GraspViewer(env, policy, viser_server=server, checkpoint_manager=ckpt_mgr)
@@ -1279,6 +1309,9 @@ def main() -> None:
     viewer._tune_reach = args.tune_reach
     viewer._free_play = args.free_play
     viewer._ghost_object = args.ghost_object
+    viewer.cfg.distance = 2.0
+    viewer.cfg.azimuth = 130.0
+    viewer.cfg.elevation = 24.0
     viewer.run()
 
 

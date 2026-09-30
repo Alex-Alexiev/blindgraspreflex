@@ -3,7 +3,6 @@
 import argparse
 import math
 import os
-import pathlib
 from dataclasses import asdict
 
 import torch
@@ -42,9 +41,6 @@ def main() -> None:
     p.add_argument("--logger", choices=("tensorboard", "wandb"), default="wandb")
     p.add_argument("--wandb-project", default="reflexive-rl")
     p.add_argument("--run-name", default="")
-    p.add_argument("--video", action="store_true", help="Record rollout videos during training.")
-    p.add_argument("--video-interval", type=int, default=100, help="Iterations between videos.")
-    p.add_argument("--video-length", type=int, default=150, help="Frames per video (~1 episode).")
     p.add_argument(
         "--contact-weight", type=float, default=None, help="Override contact reward weight."
     )
@@ -297,23 +293,6 @@ def main() -> None:
         help="Continue a run: load weights AND keep the iteration counter, so checkpoint "
         "numbering, the LR schedule and the W&B x-axis carry on. Use this to chain time-limited "
         "blocks; --init-from is for fine-tuning a DIFFERENT run and deliberately restarts at 0.",
-    )
-    p.add_argument(
-        "--video-every",
-        type=int,
-        default=0,
-        metavar="N",
-        help="Log a rollout clip to W&B every N iterations (0 = off). Frames are captured from "
-        "the LIVE training sim -- no second env, so no extra GPU memory -- by copying qpos into a "
-        "CPU MjData and rendering offscreen, the same way render_grasp_video.py replays a "
-        "checkpoint.",
-    )
-    p.add_argument(
-        "--video-seconds",
-        type=float,
-        default=6.0,
-        metavar="S",
-        help="Length of each logged clip.",
     )
     p.add_argument(
         "--reach-reward",
@@ -1062,10 +1041,6 @@ def main() -> None:
     from mjlab.envs import ManagerBasedRlEnv
 
     base_env = ManagerBasedRlEnv(env_cfg, device=args.device)
-    if args.video and args.video_every == 0:
-        # Preserve the older flags as aliases, but route them through the Viser recorder.
-        args.video_every = args.video_interval
-        args.video_seconds = args.video_length * env_cfg.decimation * env_cfg.sim.mujoco.timestep
 
     env = SafeVecEnvWrapper(base_env)
     from mjlab.rl.runner import MjlabOnPolicyRunner
@@ -1089,72 +1064,7 @@ def main() -> None:
         runner.load(args.init_from)
         runner.current_learning_iteration = 0
         print(f"[train] warm-started from {args.init_from}; iteration reset to 0")
-    if args.video_every > 0:
-        _train_with_video(runner, env, args, rl_cfg.max_iterations)
-    else:
-        runner.learn(num_learning_iterations=rl_cfg.max_iterations, init_at_random_ep_len=True)
-
-
-def _train_with_video(runner, env, args, total_iters):
-    """runner.learn in chunks, logging a clip to W&B between them.
-
-    learn() resumes from current_learning_iteration, so chunking continues the same run rather
-    than restarting it; init_at_random_ep_len is only meaningful on the first chunk.
-    """
-    step = args.video_every
-    done = 0
-    first = True
-    # learn() calls logger.stop_logging_writer() at the END of every call, and for W&B that is
-    # wandb.finish(). Chunked, the run is therefore closed after the first chunk and every later
-    # add_scalar raises "You must call wandb.init() before wandb.log()". Suppress it for the
-    # duration and close the writer once, after the last chunk.
-    _orig_stop = runner.logger.stop_logging_writer
-    runner.logger.stop_logging_writer = lambda: None
-    while done < total_iters:
-        k = min(step, total_iters - done)
-        runner.learn(num_learning_iterations=k, init_at_random_ep_len=first)
-        done += k
-        # rsl-rl stores the index of the last completed iteration, while the next learn() call
-        # treats the value as its inclusive starting index. Advance it explicitly between chunks
-        # so video capture does not repeat an update, checkpoint number, or media filename.
-        runner.current_learning_iteration += 1
-        if first:
-            # learn() calls logger.init_logging_writer() every time, and that unconditionally
-            # CONSTRUCTS a new writer -- for W&B that is a fresh wandb.init(), i.e. a brand new run
-            # per chunk (60 of them at --video-every 100 over 6000 iterations), with every metric
-            # fragmented across them and wandb.log() then failing against the closed run. Neutering
-            # it after the first chunk keeps one writer, one run, and one continuous set of curves.
-            # It also skips the re-save of code state, which is already done.
-            runner.logger.init_logging_writer = lambda: None
-        first = False
-        try:
-            from blindgraspreflex.training.viser_video import capture_rollout, write_mp4
-
-            it = runner.current_learning_iteration
-            clip = capture_rollout(
-                runner,
-                env,
-                device=args.device,
-                seconds=args.video_seconds,
-                observation_group="actor",
-            )
-            vdir = pathlib.Path(args.log_dir) / "videos"
-            vdir.mkdir(parents=True, exist_ok=True)
-            # UNIQUE per iteration: rsl_rl's wandb writer dedupes save_video by FILENAME, so a
-            # fixed name would upload the first clip and silently drop every later one.
-            path = vdir / f"rollout_{it:05d}.mp4"
-            write_mp4(path, clip)
-            writer = getattr(runner.logger, "writer", None)
-            if writer is not None and hasattr(writer, "save_video"):
-                writer.save_video(path, it)  # the logger's own supported path
-                print(f"[train] logged rollout clip at iteration {it} -> {path.name}")
-            else:
-                print(f"[train] wrote rollout clip {path} (writer has no save_video)")
-        except Exception as exc:  # a broken renderer must never kill a training run
-            print(f"[train] video logging skipped: {type(exc).__name__}: {exc}")
-
-    runner.logger.stop_logging_writer = _orig_stop
-    runner.logger.stop_logging_writer()
+    runner.learn(num_learning_iterations=rl_cfg.max_iterations, init_at_random_ep_len=True)
 
 
 if __name__ == "__main__":

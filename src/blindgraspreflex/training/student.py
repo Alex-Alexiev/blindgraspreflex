@@ -527,15 +527,6 @@ def main() -> None:
         help="(with --belief-student) weight of the contact-BCE auxiliary loss vs the "
         "behaviour-cloning loss.",
     )
-    p.add_argument(
-        "--video",
-        action="store_true",
-        help="Record rollout videos during distillation for the W&B run.",
-    )
-    p.add_argument(
-        "--video-interval", type=int, default=100, metavar="N", help="Iterations between videos."
-    )
-    p.add_argument("--video-length", type=int, default=150, metavar="STEPS")
     args = p.parse_args()
     if args.belief_student:
         import os as _os
@@ -628,54 +619,7 @@ def main() -> None:
     # --iterations is how many MORE to run, matching scripts/train_grasp.py. A caller chaining
     # time-limited blocks toward a fixed total must pass the remainder itself (ablations/train.py
     # does; a study whose arms differ in total iterations is not sample-matched).
-    if args.video:
-        _train_with_video(runner, env, args)
-    else:
-        runner.learn(num_learning_iterations=args.iterations, init_at_random_ep_len=True)
-
-
-def _train_with_video(runner, env, args) -> None:
-    """Train in chunks and upload a Viser rollout from the current student each interval."""
-
-    from blindgraspreflex.training.viser_video import capture_rollout, write_mp4
-
-    original_stop = runner.logger.stop_logging_writer
-    runner.logger.stop_logging_writer = lambda: None
-    done = 0
-    first = True
-    while done < args.iterations:
-        count = min(args.video_interval, args.iterations - done)
-        runner.learn(num_learning_iterations=count, init_at_random_ep_len=first)
-        done += count
-        runner.current_learning_iteration += 1
-        if first:
-            # Subsequent learn() calls must keep the existing W&B writer and run.
-            runner.logger.init_logging_writer = lambda: None
-        first = False
-
-        try:
-            iteration = runner.current_learning_iteration
-            video_dir = Path(args.log_dir) / "videos" / "student"
-            clip_path = video_dir / f"rollout_{iteration:05d}.mp4"
-            frames = capture_rollout(
-                runner,
-                env,
-                device=args.device,
-                seconds=args.video_length * env.unwrapped.step_dt,
-                observation_group="student",
-            )
-            write_mp4(clip_path, frames)
-            writer = getattr(runner.logger, "writer", None)
-            if writer is not None and hasattr(writer, "save_video"):
-                writer.save_video(clip_path, iteration)
-                print(
-                    f"[distill] logged Viser rollout at iteration {iteration} -> {clip_path.name}"
-                )
-        except Exception as exc:  # rendering must never terminate a training job
-            print(f"[distill] video logging skipped: {type(exc).__name__}: {exc}")
-
-    runner.logger.stop_logging_writer = original_stop
-    original_stop()
+    runner.learn(num_learning_iterations=args.iterations, init_at_random_ep_len=True)
 
 
 if __name__ == "__main__":

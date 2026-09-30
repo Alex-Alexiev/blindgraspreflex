@@ -41,11 +41,7 @@ Train a teacher from scratch:
 uv run blindgraspreflex train teacher --config configs/local.toml
 ```
 
-Each run records rollout videos at `training.video_every`, stores them beneath the configured log
-directory, and uploads them to the same W&B run. Videos are captured from the Viser WebGL scene,
-so they match the interactive viewer instead of MuJoCo's basic offscreen renderer. Install Google
-Chrome or Chromium on the training machine; capture uses the GPU when a display is available and
-falls back to headless software WebGL on compute nodes. For a quick installation check:
+For a quick installation check:
 
 ```bash
 uv run blindgraspreflex train teacher \
@@ -61,10 +57,25 @@ uv run blindgraspreflex train student \
 ```
 
 The TOML file is the single place for device, parallel environment count, iteration counts,
-video cadence, output paths, and W&B account/project. The CLI only exposes useful per-run
+output paths, viewer settings, and W&B account/project. The CLI only exposes useful per-run
 overrides.
 
-## Test a checkpoint in Viser
+## Watch training in Viser
+
+Start one persistent viewer alongside training. By default it recursively watches every student
+run beneath the configured `logs` directory:
+
+```bash
+uv run blindgraspreflex serve --config configs/local.toml
+```
+
+Use `--kind teacher` to watch teacher runs, or `--checkpoint-root PATH` to restrict the server to
+one run or another checkpoint tree. The Checkpoints tab refreshes automatically as training writes
+new `model_*.pt` files. Select any checkpoint from its dropdown (or click **Use Latest**), and use
+the Object dropdown to choose the YCB object. Loading a checkpoint replaces the running policy
+without restarting the environment or server.
+
+## Test one checkpoint in Viser
 
 Load a teacher checkpoint and open the interactive test environment:
 
@@ -76,8 +87,8 @@ uv run blindgraspreflex play \
 ```
 
 For a distilled policy, use `--kind student`. Open the printed `http://localhost:8080` URL. The
-Viser UI lets you select an environment/object, reset episodes, inspect policy state, and play the
-policy interactively. Port, device, and test-environment count live in `[viewer]` in the config.
+Viser UI lets you select an object, reset episodes, inspect policy state, and play the policy
+interactively. Port and device live in `[viewer]` in the config.
 
 ## Add a robot or hand
 
