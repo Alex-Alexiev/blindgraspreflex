@@ -42,7 +42,10 @@ uv run blindgraspreflex train teacher --config configs/local.toml
 ```
 
 Each run records rollout videos at `training.video_every`, stores them beneath the configured log
-directory, and uploads them to the same W&B run. For a quick installation check:
+directory, and uploads them to the same W&B run. Videos are captured from the Viser WebGL scene,
+so they match the interactive viewer instead of MuJoCo's basic offscreen renderer. Install Google
+Chrome or Chromium on the training machine; capture uses the GPU when a display is available and
+falls back to headless software WebGL on compute nodes. For a quick installation check:
 
 ```bash
 uv run blindgraspreflex train teacher \

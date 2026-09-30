@@ -1061,26 +1061,11 @@ def main() -> None:
 
     from mjlab.envs import ManagerBasedRlEnv
 
-    # rgb_array only when recording -- the offscreen GL context has a per-step cost.
-    render_mode = "rgb_array" if args.video else None
-    base_env = ManagerBasedRlEnv(env_cfg, device=args.device, render_mode=render_mode)
-
-    if args.video:
-        from pathlib import Path
-
-        from mjlab.utils.wrappers.video_recorder import VideoRecorder
-
-        # Videos land under the log dir; rsl_rl's wandb logger rglobs *.mp4 and uploads each
-        # new one at its training step, so they show up in the dashboard per interval.
-        steps_per_iter = rl_cfg.num_steps_per_env
-        base_env = VideoRecorder(
-            base_env,
-            video_folder=Path(args.log_dir) / "videos" / "train",
-            step_trigger=lambda step: step % (args.video_interval * steps_per_iter) == 0,
-            video_length=args.video_length,
-            disable_logger=True,
-        )
-        print(f"[train] recording video every {args.video_interval} iters")
+    base_env = ManagerBasedRlEnv(env_cfg, device=args.device)
+    if args.video and args.video_every == 0:
+        # Preserve the older flags as aliases, but route them through the Viser recorder.
+        args.video_every = args.video_interval
+        args.video_seconds = args.video_length * env_cfg.decimation * env_cfg.sim.mujoco.timestep
 
     env = SafeVecEnvWrapper(base_env)
     from mjlab.rl.runner import MjlabOnPolicyRunner
@@ -1108,53 +1093,6 @@ def main() -> None:
         _train_with_video(runner, env, args, rl_cfg.max_iterations)
     else:
         runner.learn(num_learning_iterations=rl_cfg.max_iterations, init_at_random_ep_len=True)
-
-
-def _capture_clip(runner, env, args, n_worlds=3):
-    """Render a short rollout of the CURRENT policy from the live training sim.
-
-    Returns (T, C, H, W) uint8 for wandb.Video. Frames come from the same warp sim that is
-    training: qpos is copied into a CPU MjData and rendered offscreen, because MuJoCo's renderer
-    needs CPU state. Costs a handful of extra env steps, which PPO simply collects its next
-    rollout after -- it does not corrupt the update.
-    """
-    import mujoco
-    import numpy as np
-
-    base = env.unwrapped
-    mj_model = base.sim._mj_model
-    mj_data = mujoco.MjData(mj_model)
-    cam = mujoco.MjvCamera()
-    mujoco.mjv_defaultCamera(cam)
-    cam.distance, cam.azimuth, cam.elevation = 0.72, 128.0, -18.0
-    cam.lookat[:] = [0.55, 0.13, 0.11]
-    renderer = mujoco.Renderer(mj_model, height=240, width=320)
-
-    policy = runner.get_inference_policy(device=args.device)
-    n_steps = int(round(args.video_seconds / base.step_dt))
-    every = max(1, int(round(1.0 / (20.0 * base.step_dt))))
-    nq = mj_model.nq
-    frames = []
-    obs = env.get_observations()
-    obs = obs[0] if isinstance(obs, tuple) else obs
-    with torch.inference_mode():
-        for i in range(n_steps):
-            o = obs.get("actor", next(iter(obs.values()))) if isinstance(obs, dict) else obs
-            out = env.step(policy(o))
-            obs = out[0]
-            if i % every:
-                continue
-            qpos = base.sim.data.qpos.detach().cpu().numpy()
-            tiles = []
-            for w in range(min(n_worlds, qpos.shape[0])):
-                mj_data.qpos[:] = qpos[w, :nq]
-                mujoco.mj_forward(mj_model, mj_data)
-                renderer.update_scene(mj_data, camera=cam)
-                tiles.append(renderer.render())
-            frames.append(np.concatenate(tiles, axis=1))  # side by side
-    renderer.close()
-    runner.alg.train_mode()
-    return np.stack(frames).transpose(0, 3, 1, 2)
 
 
 def _train_with_video(runner, env, args, total_iters):
@@ -1190,24 +1128,22 @@ def _train_with_video(runner, env, args, total_iters):
             runner.logger.init_logging_writer = lambda: None
         first = False
         try:
-            import imageio.v2 as imageio
+            from blindgraspreflex.training.viser_video import capture_rollout, write_mp4
 
             it = runner.current_learning_iteration
-            clip = _capture_clip(runner, env, args)  # (T, C, H, W) uint8
+            clip = capture_rollout(
+                runner,
+                env,
+                device=args.device,
+                seconds=args.video_seconds,
+                observation_group="actor",
+            )
             vdir = pathlib.Path(args.log_dir) / "videos"
             vdir.mkdir(parents=True, exist_ok=True)
             # UNIQUE per iteration: rsl_rl's wandb writer dedupes save_video by FILENAME, so a
             # fixed name would upload the first clip and silently drop every later one.
             path = vdir / f"rollout_{it:05d}.mp4"
-            imageio.mimwrite(
-                path,
-                clip.transpose(0, 2, 3, 1),
-                fps=20,
-                codec="libx264",
-                quality=6,
-                macro_block_size=8,
-                output_params=["-pix_fmt", "yuv420p"],
-            )
+            write_mp4(path, clip)
             writer = getattr(runner.logger, "writer", None)
             if writer is not None and hasattr(writer, "save_video"):
                 writer.save_video(path, it)  # the logger's own supported path
