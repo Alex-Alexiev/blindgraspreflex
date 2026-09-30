@@ -1,0 +1,29 @@
+{
+  "description": "Five-dimensional grasp PCA used by the Robotis 5F policy",
+  "z_dim": 5,
+  "qpos_dim": 20,
+  "num_samples": 300,
+  "robot_joint_names": [
+    "a08_finger_r_joint_1_thumb1",
+    "a09_finger_r_joint_1_thumb2",
+    "a10_finger_r_joint_1_thumb3",
+    "a11_finger_r_joint_1_thumb4",
+    "a12_finger_r_joint_2_index1",
+    "a13_finger_r_joint_2_index2",
+    "a14_finger_r_joint_2_index3",
+    "a15_finger_r_joint_2_index4",
+    "a16_finger_r_joint_3_middle1",
+    "a17_finger_r_joint_3_middle2",
+    "a18_finger_r_joint_3_middle3",
+    "a19_finger_r_joint_3_middle4",
+    "a20_finger_r_joint_4_ring1",
+    "a21_finger_r_joint_4_ring2",
+    "a22_finger_r_joint_4_ring3",
+    "a23_finger_r_joint_4_ring4",
+    "a24_finger_r_joint_5_little1",
+    "a25_finger_r_joint_5_little2",
+    "a26_finger_r_joint_5_little3",
+    "a27_finger_r_joint_5_little4"
+  ]
+}
+

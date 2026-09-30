@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.ruff_cache/
+.pytest_cache/
+build/
+dist/
+logs/
+checkpoints/
+datasets/
+wandb/
+*.pt
+*.onnx
+MUJOCO_LOG.TXT
+
