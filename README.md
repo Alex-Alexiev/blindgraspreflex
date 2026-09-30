@@ -1,58 +1,108 @@
 # blindgraspreflex
 
-Minimal training code for **Blind Grasp Reflex**: a privileged grasping teacher distilled into a
-blind, proprioceptive policy that acts from hand joint positions and actuator tracking error.
+Minimal training and evaluation code for **Blind Grasp Reflex**: train a privileged grasping
+teacher, then distill it into a blind policy whose canonical observation is recent hand
+proprioception plus actuator tracking error (`q_cmd - q`). This repository does not include robot
+deployment, hardware communication, paper-generation scripts, or historical experiments.
 
-This repository is intentionally limited to policy training. It does not contain robot deployment,
-hardware communication, paper-generation scripts, historical experiments, or unrelated baselines.
+## Method
 
-## Canonical method
-
-Training has two stages:
+Training has one public entry point and two stages:
 
 1. A privileged GRU teacher observes object-relative and distributed contact information.
 2. A feed-forward student is distilled with DAgger from five frames of
    `[hand_joint_position, q_cmd - q]`.
 
-The student controls the hand while a model-based phase controller moves the arm through reach,
-lift, and retry phases. Hand commands are projected halfway toward a hand-specific grasp PCA
-manifold. The repository bundles the fixed five-dimensional PCA vectors used by the Robotis 5F
-hand; fitting new PCA models is deliberately out of scope for the initial release.
+A model-based phase controller moves the arm through reach, lift, and retry phases while the
+policy controls the hand. Hand commands are projected halfway toward a hand-specific grasp PCA
+manifold. The fixed five-dimensional PCA model used for the Robotis 5F hand is bundled; fitting
+new PCA models is out of scope.
 
-## Embodiments
+## Install and configure
 
-Robot-specific information is provided by an embodiment plugin. Core training code does not assume
-seven arm joints, twenty hand joints, or any particular MuJoCo body names.
+The working example currently expects a checkout of the robot MJCF assets and a prepared YCB
+dataset. Clone those separately, then:
 
-An embodiment declares:
+```bash
+uv sync --extra cu128 --extra dev  # NVIDIA CUDA 12.8
+# or: uv sync --extra cpu --extra dev
+cp configs/example.toml configs/local.toml
+```
 
-- its combined arm-hand MJCF;
-- arm and hand joint names;
-- the controlled palm site and contact links;
-- home, reach, and open poses;
-- actuator and velocity-field limits; and
-- an optional hand PCA model.
+Edit `configs/local.toml`. Set the two asset paths and put your W&B username or team in
+`wandb.entity`. The local file is ignored by Git so machine-specific paths and account names are
+not published. Use `mode = "offline"` if you do not want to upload a run.
 
-Installed packages can register an embodiment with a Python entry point:
+## Train
+
+Train a teacher from scratch:
+
+```bash
+uv run blindgraspreflex train teacher --config configs/local.toml
+```
+
+Each run records rollout videos at `training.video_every`, stores them beneath the configured log
+directory, and uploads them to the same W&B run. For a quick installation check:
+
+```bash
+uv run blindgraspreflex train teacher \
+  --config configs/local.toml --iterations 1 --run-name smoke-test
+```
+
+Then distill the canonical q_cmd student from a teacher checkpoint:
+
+```bash
+uv run blindgraspreflex train student \
+  --config configs/local.toml \
+  --teacher-checkpoint logs/teacher/<teacher-run>/model_3500.pt
+```
+
+The TOML file is the single place for device, parallel environment count, iteration counts,
+video cadence, output paths, and W&B account/project. The CLI only exposes useful per-run
+overrides.
+
+## Test a checkpoint in Viser
+
+Load a teacher checkpoint and open the interactive test environment:
+
+```bash
+uv run blindgraspreflex play \
+  --config configs/local.toml \
+  --checkpoint logs/teacher/<teacher-run>/model_3500.pt \
+  --kind teacher
+```
+
+For a distilled policy, use `--kind student`. Open the printed `http://localhost:8080` URL. The
+Viser UI lets you select an environment/object, reset episodes, inspect policy state, and play the
+policy interactively. Port, device, and test-environment count live in `[viewer]` in the config.
+
+## Add a robot or hand
+
+Robot-specific metadata uses an embodiment plugin. An embodiment declares its combined arm-hand
+MJCF, arm and hand joint names, controlled palm site and contact links, poses, limits, and optional
+PCA model. A separate Python package can register one without editing this repository:
 
 ```toml
 [project.entry-points."blindgraspreflex.embodiments"]
 my_robot = "my_robot.blindgraspreflex:make_embodiment"
 ```
 
-Validate one without starting training:
+Inspect `src/blindgraspreflex/embodiments/robotis_5f.py`, then validate a plugin before training:
 
 ```bash
-uv run blindgraspreflex embodiment validate robotis_5f
 uv run blindgraspreflex embodiment list
+uv run blindgraspreflex embodiment validate my_robot
 ```
 
-The bundled `robotis_5f` metadata and PCA vectors are ready. Its combined robot MJCF is not copied
-from the research repository: pass its location using `BLINDGRASPREFLEX_ROBOTIS_5F_MJCF` until the
-asset redistribution boundary is finalized.
+The bundled `robotis_5f` plugin includes metadata and PCA vectors. Its combined MJCF remains an
+external asset; point `BLINDGRASPREFLEX_ROBOTIS_5F_MJCF` at that file for standalone plugin
+validation.
 
-## Status
+## Development
 
-The new package and embodiment boundary are in place. The canonical environment and two training
-stages are being extracted from the research repository next.
+```bash
+uv run pytest
+uv run ruff check src tests
+```
 
+Licensed under the MIT License.

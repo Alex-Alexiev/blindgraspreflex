@@ -72,4 +72,3 @@ class MethodConfig:
 
 
 CANONICAL_METHOD = MethodConfig()
-

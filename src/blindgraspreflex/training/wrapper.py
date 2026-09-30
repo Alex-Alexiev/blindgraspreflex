@@ -17,4 +17,3 @@ class SafeVecEnvWrapper(RslRlVecEnvWrapper):
         }
         rewards = torch.nan_to_num(rewards, nan=0.0, posinf=0.0, neginf=0.0)
         return observations, rewards, dones, extras
-

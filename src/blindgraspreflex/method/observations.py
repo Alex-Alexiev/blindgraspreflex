@@ -70,4 +70,3 @@ class QCommandHistory:
         if joint_position.shape != expected or joint_command.shape != expected:
             raise ValueError(f"expected joint tensors shaped (N, {self.hand_dof})")
         return torch.cat((joint_position, joint_command - joint_position), dim=-1)
-

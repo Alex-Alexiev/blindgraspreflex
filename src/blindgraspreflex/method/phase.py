@@ -117,9 +117,7 @@ class ReflexPhaseController:
         position_uniform = 2.0 * torch.rand(count, 3, device=self.device) - 1.0
         rpy_uniform = 2.0 * torch.rand(count, 3, device=self.device) - 1.0
         self.position_noise[env_ids] = position_uniform * self._position_magnitude
-        self.orientation_noise[env_ids] = euler_xyz_to_quaternion(
-            rpy_uniform * self._rpy_magnitude
-        )
+        self.orientation_noise[env_ids] = euler_xyz_to_quaternion(rpy_uniform * self._rpy_magnitude)
 
     def update(
         self,
@@ -158,9 +156,7 @@ class ReflexPhaseController:
             quaternion_multiply(self.lift_orientation, self._fixed_orientation),
             self.orientation_noise,
         )
-        target_position = torch.where(
-            reaching.unsqueeze(-1), reach_position, self.lift_position
-        )
+        target_position = torch.where(reaching.unsqueeze(-1), reach_position, self.lift_position)
         target_orientation = torch.where(
             reaching.unsqueeze(-1), reach_orientation, self.lift_orientation
         )
@@ -172,4 +168,3 @@ class ReflexPhaseController:
         target_position = palm_position + target_delta * target_scale
         target_position[:, 2].clamp_(min=self.config.minimum_setpoint_z)
         return target_position, target_orientation
-

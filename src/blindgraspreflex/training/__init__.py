@@ -3,4 +3,3 @@
 from blindgraspreflex.training.wrapper import SafeVecEnvWrapper
 
 __all__ = ["SafeVecEnvWrapper"]
-

@@ -42,4 +42,3 @@ def load_hand_pca(directory: Path, joint_names: tuple[str, ...]) -> HandPCA:
     if components.shape[1] != len(joint_names):
         raise ValueError("PCA component width does not match the embodiment hand DOF")
     return HandPCA(components=components, mean=mean, lower=lower, upper=upper)
-

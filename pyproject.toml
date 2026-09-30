@@ -6,8 +6,14 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "mjlab>=1.5,<2",
+    "imageio[ffmpeg]>=2.37",
+    "mjlab==1.5.2",
     "numpy>=1.26",
+    "scipy>=1.14",
+    "trimesh>=4.8",
+    "viser>=1.0",
+    # rsl-rl 5.4 still passes Settings(start_method=...), removed in wandb 0.30.
+    "wandb==0.28.1",
 ]
 
 [project.optional-dependencies]
@@ -43,3 +49,4 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"] # Formatter intentionally leaves long comments and CLI help strings.

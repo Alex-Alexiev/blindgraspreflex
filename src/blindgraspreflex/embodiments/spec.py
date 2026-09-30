@@ -85,4 +85,3 @@ class EmbodimentSpec:
         errors = self.validate(require_mjcf=require_mjcf)
         if errors:
             raise ValueError("Invalid embodiment:\n- " + "\n- ".join(errors))
-

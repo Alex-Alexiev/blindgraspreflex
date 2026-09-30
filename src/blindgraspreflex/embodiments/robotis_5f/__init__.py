@@ -27,8 +27,7 @@ HAND_KD = (0.25, 0.20, 0.12, 0.08) * 5
 HAND_EFFORT = (1.0,) * 20
 
 CONTACT_BODIES = tuple(
-    [f"finger_r_link_{finger}{level}" for finger in FINGERS for level in (2, 3, 4)]
-    + ["palm"]
+    [f"finger_r_link_{finger}{level}" for finger in FINGERS for level in (2, 3, 4)] + ["palm"]
 )
 FINGERTIP_BODIES = ("thumb_tip", "index_tip", "middle_tip", "ring_tip", "little_tip")
 
@@ -65,4 +64,3 @@ def make_embodiment() -> EmbodimentSpec:
 
 
 __all__ = ["make_embodiment"]
-

@@ -1,0 +1,26 @@
+[paths]
+# Directory containing the combined robot assets. For the built-in example this is the
+# Manipulator-Software checkout containing assets/scene/flexiv_arm/Rizon4_new_hand_robot.xml.
+manipulator_software = "/path/to/Manipulator-Software"
+ycb = "/path/to/prepared/ycb"
+logs = "logs"
+
+[wandb]
+# Your W&B username or team. This is passed through WANDB_ENTITY.
+entity = "your-wandb-entity"
+project = "blindgraspreflex"
+mode = "online"
+
+[training]
+device = "cuda:0"
+num_envs = 2048
+teacher_iterations = 3500
+student_iterations = 3550
+video_every = 100
+video_seconds = 6.0
+
+[viewer]
+device = "cuda:0"
+port = 8080
+num_envs = 16
+

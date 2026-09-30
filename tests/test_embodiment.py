@@ -8,4 +8,3 @@ def test_robotis_metadata_and_pca_are_self_consistent() -> None:
     pca = load_hand_pca(embodiment.hand.pca_directory, embodiment.hand.joint_names)
     assert pca.components.shape == (5, 20)
     assert pca.mean.shape == (20,)
-

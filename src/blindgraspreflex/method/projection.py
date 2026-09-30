@@ -29,10 +29,7 @@ class HandPCAProjector:
 
     def __call__(self, command: torch.Tensor) -> torch.Tensor:
         if command.shape[-1] != self.hand_dof:
-            raise ValueError(
-                f"command has {command.shape[-1]} joints; PCA expects {self.hand_dof}"
-            )
+            raise ValueError(f"command has {command.shape[-1]} joints; PCA expects {self.hand_dof}")
         latent = (command - self.mean) @ self.components.T
         projected = latent @ self.components + self.mean
         return torch.lerp(command, projected, self.alpha)
-

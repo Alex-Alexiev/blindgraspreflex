@@ -1,0 +1,194 @@
+{
+  "_comment": "Per-(arm, mount) arm home joint vectors, fitted by scripts/fit_mount_home.py so that grasp_site lands on that arm's FLOOR-mount home palm pose. Do not hand-edit: the LIFT goal and the held palm attitude are forward kinematics of these, so a changed value silently moves the task's goal. Re-run the script instead.",
+  "reference_home_site": {
+    "rizon4": {
+      "pos": [
+        0.5219869331693856,
+        0.12716323323868095,
+        0.21313304061930272
+      ],
+      "quat": [
+        -0.34109854294129366,
+        0.6120397402183575,
+        -0.5920564831167363,
+        -0.3981560764275903
+      ]
+    }
+  },
+  "joint_order": {
+    "rizon4": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6",
+      "joint7"
+    ]
+  },
+  "homes": {
+    "rizon4/opposite": {
+      "joint1": 0.23820056021213531,
+      "joint2": -0.8081327676773071,
+      "joint3": 0.5732269287109375,
+      "joint4": 1.7942464351654053,
+      "joint5": -1.0882222652435303,
+      "joint6": -0.18492715060710907,
+      "joint7": -0.27682769298553467
+    },
+    "rizon4/left": {
+      "joint1": -0.6377304196357727,
+      "joint2": -1.4244948625564575,
+      "joint3": -1.425763487815857,
+      "joint4": -1.0696780681610107,
+      "joint5": -1.9842150211334229,
+      "joint6": 2.318706512451172,
+      "joint7": 0.5854306221008301
+    },
+    "rizon4/ceiling": {
+      "joint1": 1.1431283950805664,
+      "joint2": 1.2105097770690918,
+      "joint3": 0.4916074872016907,
+      "joint4": 1.6662225723266602,
+      "joint5": -0.14544585347175598,
+      "joint6": 0.9762120246887207,
+      "joint7": 0.6539697051048279
+    },
+    "rizon4/wall": {
+      "joint1": -1.045982003211975,
+      "joint2": -0.20952729880809784,
+      "joint3": 0.8314293026924133,
+      "joint4": 1.3003497123718262,
+      "joint5": 1.3018242120742798,
+      "joint6": 0.2100447118282318,
+      "joint7": 0.16622255742549896
+    },
+    "rizon4/pedestal": {
+      "joint1": 0.26870736479759216,
+      "joint2": -1.3469116687774658,
+      "joint3": -0.3070773780345917,
+      "joint4": 1.3984003067016602,
+      "joint5": 1.950154185295105,
+      "joint6": 0.9171012043952942,
+      "joint7": 0.4785306453704834
+    },
+    "rizon4/right": {
+      "joint1": 0.08511913567781448,
+      "joint2": -0.8263927102088928,
+      "joint3": 0.28375059366226196,
+      "joint4": 1.3745335340499878,
+      "joint5": 0.07763587683439255,
+      "joint6": -0.4638954997062683,
+      "joint7": 0.3647906184196472
+    },
+    "rizon4/overhead_tilt": {
+      "joint1": -0.3075232207775116,
+      "joint2": 1.3196206092834473,
+      "joint3": 1.1410735845565796,
+      "joint4": 1.222099781036377,
+      "joint5": 1.3951396942138672,
+      "joint6": 0.8582293391227722,
+      "joint7": 0.06007160618901253
+    }
+  },
+  "meta": {
+    "rizon4/opposite": {
+      "seeds": 768,
+      "exact": 409,
+      "best_pos_err": 0.0,
+      "best_rot_err": 7.300049276182108e-08,
+      "distinct": 276,
+      "collision_free": 276,
+      "scored": 64,
+      "workspace_reach": 1.0,
+      "limit_margin": 0.9808535575866699,
+      "fk_pos_err_mm": 0.0001274361443677562,
+      "fk_rot_err_deg": 1.6234069518916896e-05,
+      "home_min_link_z": -0.091
+    },
+    "rizon4/left": {
+      "seeds": 768,
+      "exact": 434,
+      "best_pos_err": 0.0,
+      "best_rot_err": 1.2287813433431438e-07,
+      "distinct": 286,
+      "collision_free": 286,
+      "scored": 64,
+      "workspace_reach": 0.9489795918367347,
+      "limit_margin": 0.8851219415664673,
+      "fk_pos_err_mm": 0.0002911995010599526,
+      "fk_rot_err_deg": 9.540362156354742e-06,
+      "home_min_link_z": -0.091
+    },
+    "rizon4/ceiling": {
+      "seeds": 768,
+      "exact": 528,
+      "best_pos_err": 0.0,
+      "best_rot_err": 5.1619135632563484e-08,
+      "distinct": 339,
+      "collision_free": 339,
+      "scored": 64,
+      "workspace_reach": 0.9897959183673469,
+      "limit_margin": 1.108877420425415,
+      "fk_pos_err_mm": 0.00025582986437465666,
+      "fk_rot_err_deg": 1.2157099975496144e-05,
+      "home_min_link_z": 0.1529639229276714
+    },
+    "rizon4/wall": {
+      "seeds": 768,
+      "exact": 510,
+      "best_pos_err": 0.0,
+      "best_rot_err": 1.7631293758313404e-07,
+      "distinct": 332,
+      "collision_free": 332,
+      "scored": 64,
+      "workspace_reach": 0.9693877551020408,
+      "limit_margin": 1.474750280380249,
+      "fk_pos_err_mm": 0.00044375522601189545,
+      "fk_rot_err_deg": 6.63205074333526e-06,
+      "home_min_link_z": 0.15296374131466756
+    },
+    "rizon4/pedestal": {
+      "seeds": 768,
+      "exact": 433,
+      "best_pos_err": 0.0,
+      "best_rot_err": 5.1619135632563484e-08,
+      "distinct": 223,
+      "collision_free": 223,
+      "scored": 64,
+      "workspace_reach": 0.9285714285714286,
+      "limit_margin": 1.0092883110046387,
+      "fk_pos_err_mm": 0.00012557451113138403,
+      "fk_rot_err_deg": 6.122614234530056e-06,
+      "home_min_link_z": 0.15296409955763754
+    },
+    "rizon4/right": {
+      "seeds": 768,
+      "exact": 397,
+      "best_pos_err": 0.0,
+      "best_rot_err": 1.4600097131278744e-07,
+      "distinct": 268,
+      "collision_free": 193,
+      "scored": 64,
+      "workspace_reach": 1.0,
+      "limit_margin": 1.0196044445037842,
+      "fk_pos_err_mm": 8.820873578369072e-05,
+      "fk_rot_err_deg": 1.448258239140093e-05,
+      "home_min_link_z": -0.091
+    },
+    "rizon4/overhead_tilt": {
+      "seeds": 768,
+      "exact": 498,
+      "best_pos_err": 0.0,
+      "best_rot_err": 0.0,
+      "distinct": 344,
+      "collision_free": 344,
+      "scored": 64,
+      "workspace_reach": 0.9387755102040817,
+      "limit_margin": 1.0365793704986572,
+      "fk_pos_err_mm": 0.00016449834376508856,
+      "fk_rot_err_deg": 5.853140102806898e-06,
+      "home_min_link_z": 0.15296404260454327
+    }
+  }
+}

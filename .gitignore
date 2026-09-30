@@ -10,7 +10,7 @@ logs/
 checkpoints/
 datasets/
 wandb/
+configs/local.toml
 *.pt
 *.onnx
 MUJOCO_LOG.TXT
-
