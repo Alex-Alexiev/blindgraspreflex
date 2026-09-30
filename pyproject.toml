@@ -3,6 +3,7 @@ name = "blindgraspreflex"
 version = "0.1.0"
 description = "Minimal training code for Blind Grasp Reflex policies."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "mjlab>=1.5,<2",
@@ -42,4 +43,3 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-
