@@ -35,6 +35,54 @@ not published. Use `mode = "offline"` if you do not want to upload a run.
 
 ## Train
 
+### Primitive clutter grasping
+
+The `Reflexive-Grasp-Primitive-Clutter` task places a central primitive target among seven
+different primitive obstacles. Each reset packs them tightly around the target in a random
+order and with random yaws: each obstacle takes the closest spot that leaves a 0-1 cm gap to
+everything already placed, so 3-5 start within 1 cm of the target and the rest within 1 cm of
+those. It uses a free moving RH-5 hand with no robot arm. The policy controls world-frame palm linear and angular velocity
+(6 outputs) and all 20 hand joint targets directly; there is no hand PCA projection. Its actor
+sees palm pose and twist, hand joint position and velocity, hand command error, palm-to-target
+vector, fingertip contacts, and the target-relative centres
+and bounding-sphere radii of the five nearest obstacles. Rewards encourage obstacle
+clearance (each obstacle's push away from the target counts up to 15 cm), penalize target motion in the table plane, and encourage the palm to approach and
+face the target. That reward is measured from a point on the palm face at the knuckles, along
+the face normal, the palm's local +X; +Z runs from the wrist toward the fingers. Proximity and facing are combined
+in one reward. Two contact terms count the palm and phalanx links touching an
+obstacle: contact on the back or side of the hand is rewarded, and contact on the palm or finger
+pads, which the hand needs for the target, is penalized at twice that rate. The palm velocity is integrated directly at the physics rate while
+finger and object contacts remain simulated. The policy runs at 10 Hz, and the table-plane
+penalty allows lifting.
+
+```bash
+uv run python -m blindgraspreflex.training.teacher \
+  --task Reflexive-Grasp-Primitive-Clutter \
+  --num-envs 512 --device cuda:0 --iterations 2000 \
+  --logger wandb --wandb-project blindgraspreflex \
+  --record-video --video-length 80 --video-interval 2400 \
+  --log-dir logs/primitive_clutter_grasp
+```
+
+The repository's robot MJCF is required as for the other grasp tasks. Set
+`BLINDGRASPREFLEX_MANIPULATOR_SOFTWARE` if it lives outside this checkout.
+
+The same task also trains with SimToolReal's SAPG trainer, the reference repository's rl_games
+fork, using 6 policy blocks, an LSTM actor and a central-value critic:
+
+```bash
+uv sync --extra cu128 --extra sapg && scripts/fetch_rl_games.sh
+uv run python -m blindgraspreflex.training.sapg --run-name <name> --num-envs 24576
+```
+
+rl_games clips actions to [-1, 1], so this trainer maps them linearly onto the palm twist limits
+and finger joint ranges. It caps the contact buffers at 128 contacts and 1024 constraint rows per world,
+with convex-collision scratch sized separately at 64 slots per world. A run with 24,576
+environments needs about 54 GB of GPU memory. On ORCD, `scripts/orcd_sync.sh` pushes
+the code, `scripts/orcd_setup.sh` installs it once, and `RUN=<name> scripts/orcd_submit.sh` queues
+one copy per GPU type. The first copy to start cancels the rest. The job resumes from its last
+checkpoint and resubmits itself at the wall-clock limit.
+
 Train a teacher from scratch:
 
 ```bash

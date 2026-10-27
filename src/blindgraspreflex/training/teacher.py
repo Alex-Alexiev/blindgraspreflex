@@ -4,6 +4,7 @@ import argparse
 import math
 import os
 from dataclasses import asdict
+from pathlib import Path
 
 import torch
 from mjlab.rl import RslRlVecEnvWrapper
@@ -41,6 +42,20 @@ def main() -> None:
     p.add_argument("--logger", choices=("tensorboard", "wandb"), default="wandb")
     p.add_argument("--wandb-project", default="reflexive-rl")
     p.add_argument("--run-name", default="")
+    p.add_argument(
+        "--record-video",
+        action="store_true",
+        help="Save training rollouts as MP4s and upload them to W&B.",
+    )
+    p.add_argument(
+        "--video-length", type=int, default=100, help="Frames per training video (default 100)."
+    )
+    p.add_argument(
+        "--video-interval",
+        type=int,
+        default=2400,
+        help="Control steps between video recordings (default 2400).",
+    )
     p.add_argument(
         "--contact-weight", type=float, default=None, help="Override contact reward weight."
     )
@@ -927,9 +942,15 @@ def main() -> None:
     if args.hand_gate:
         env_cfg.actions["grasp"].hand_gate = True
         print("[train] hand_gate ON (hand policy engaged only when palm is near the object)")
-    env_cfg.actions["grasp"].reach_hand_pose = args.reach_hand_pose
-    if args.reach_hand_pose:
+    # The clutter policy has exactly [palm twist(6), hand joints(20)]. The canonical
+    # teacher CLI defaults to an extra learned REACH hand block, which is meaningful only
+    # for the phase-controlled task and must not silently change the clutter action size.
+    reach_hand_pose = args.reach_hand_pose and args.task != "Reflexive-Grasp-Primitive-Clutter"
+    env_cfg.actions["grasp"].reach_hand_pose = reach_hand_pose
+    if reach_hand_pose:
         print("[train] reach_hand_pose ON (learned REACH hand pose: 5-D PCA latent or 20-D joints)")
+    elif args.task == "Reflexive-Grasp-Primitive-Clutter":
+        print("[train] reach_hand_pose OFF (clutter action is palm twist(6) + hand joints(20))")
     else:
         print("[train] reach_hand_pose OFF (fixed pre-grasp pose during approach)")
     if args.pca_latent_scale is not None:
@@ -1040,7 +1061,38 @@ def main() -> None:
 
     from mjlab.envs import ManagerBasedRlEnv
 
-    base_env = ManagerBasedRlEnv(env_cfg, device=args.device)
+    if args.record_video:
+        if args.video_length < 1 or args.video_interval < args.video_length:
+            p.error("--video-length must be positive and --video-interval at least video-length")
+        env_cfg.viewer.origin_type = env_cfg.viewer.OriginType.WORLD
+        env_cfg.viewer.lookat = (0.55, 0.12, 0.16)
+        env_cfg.viewer.distance = 1.4
+        env_cfg.viewer.azimuth = 130.0
+        env_cfg.viewer.elevation = -30.0
+        env_cfg.viewer.width = 640
+        env_cfg.viewer.height = 480
+        env_cfg.viewer.max_extra_envs = 0
+    base_env = ManagerBasedRlEnv(
+        env_cfg, device=args.device, render_mode="rgb_array" if args.record_video else None
+    )
+    if args.record_video:
+        from mjlab.utils.wrappers import VideoRecorder
+
+        from blindgraspreflex.assets.mounts import hide_enclosure_geoms
+
+        hide_enclosure_geoms(base_env.sim._mj_model)
+        base_env.sim.expanded_fields.discard("geom_rgba")
+        base_env = VideoRecorder(
+            base_env,
+            video_folder=Path(args.log_dir) / "videos" / "train",
+            step_trigger=lambda step: step % args.video_interval == 0,
+            video_length=args.video_length,
+        )
+        print(
+            f"[train] recording {args.video_length}-frame videos every "
+            f"{args.video_interval} steps under {args.log_dir}/videos/train",
+            flush=True,
+        )
 
     env = SafeVecEnvWrapper(base_env)
     from mjlab.rl.runner import MjlabOnPolicyRunner

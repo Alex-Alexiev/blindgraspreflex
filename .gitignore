@@ -14,3 +14,4 @@ configs/local.toml
 *.pt
 *.onnx
 MUJOCO_LOG.TXT
+third_party/

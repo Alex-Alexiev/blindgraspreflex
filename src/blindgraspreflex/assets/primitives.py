@@ -36,6 +36,8 @@ __all__ = [
     "get_primitive_object_cfg",
     "get_primitive_spec",
     "get_primitive_variant_object_cfg",
+    "get_primitive_bounding_radius",
+    "get_primitive_hull_vertices",
 ]
 
 # Uniform-density inertia, same convention/range as assets.objaverse.
@@ -90,6 +92,18 @@ def _params(name: str):
     if not 0 <= idx < len(_CATALOGUE):
         raise ValueError(f"Primitive index {idx} out of range 0..{len(_CATALOGUE) - 1}.")
     return _CATALOGUE[idx]
+
+
+def get_primitive_bounding_radius(name: str) -> float:
+    """Conservative radius of a sphere enclosing this primitive in any orientation."""
+    _, aspect, short = _params(name)
+    half = np.asarray(aspect, dtype=np.float64) * (short / (2.0 * min(aspect)))
+    return float(np.linalg.norm(half))
+
+
+def get_primitive_hull_vertices(name: str) -> np.ndarray:
+    """(V, 3) vertices of the primitive's collision hull, in its body frame."""
+    return np.asarray(_build_meshes(name)[1].vertices, dtype=np.float64)
 
 
 # Fixed support directions (icosphere vertices) for the uniform collision hull -- identical for
@@ -169,8 +183,9 @@ def add_primitive_object(
     del max_collision_hulls
     visual, collision, inertial = _build_meshes(name)
 
+    mesh_prefix = body_name if body_name != "object" else name
     spec.add_mesh(
-        name=f"{name}_visual_mesh",
+        name=f"{mesh_prefix}_visual_mesh",
         uservert=np.asarray(visual.vertices, dtype=np.float64).flatten(),
         userface=np.asarray(visual.faces, dtype=np.int32).flatten(),
     )
@@ -186,7 +201,7 @@ def add_primitive_object(
     body.add_geom(
         name=f"{body_name}_visual",
         type=mujoco.mjtGeom.mjGEOM_MESH,
-        meshname=f"{name}_visual_mesh",
+        meshname=f"{mesh_prefix}_visual_mesh",
         contype=0,
         conaffinity=0,
         group=1,
@@ -194,14 +209,14 @@ def add_primitive_object(
         rgba=rgba,
     )
     spec.add_mesh(
-        name=f"{name}_hull_0",
+        name=f"{mesh_prefix}_hull_0",
         uservert=np.asarray(collision.vertices, dtype=np.float64).flatten(),
         userface=np.asarray(collision.faces, dtype=np.int32).flatten(),
     )
     body.add_geom(
         name=f"{body_name}_collision_0",
         type=mujoco.mjtGeom.mjGEOM_MESH,
-        meshname=f"{name}_hull_0",
+        meshname=f"{mesh_prefix}_hull_0",
         group=3,
         density=0.0,
         condim=6,

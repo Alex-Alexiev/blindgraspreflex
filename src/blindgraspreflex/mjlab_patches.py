@@ -156,3 +156,29 @@ def disable_padded_variant_geoms(env, entity_name: str = "object", verbose: bool
             f"({per_world.min()}-{per_world.max()} per world, of {len(slots)} slots)"
         )
     return n
+
+
+_CCD_PER_WORLD: int | None = None
+
+
+def cap_ccd_scratch(per_world: int) -> None:
+    """Size MuJoCo Warp's convex-collision (EPA / multi-CCD) scratch at ``per_world`` per world.
+
+    ``put_data`` sizes it from the whole contact pool (``naccdmax = naconmax``). For the hand's
+    meshes that is ~23.5 KB per slot, so raising ``nconmax`` for headroom would multiply memory
+    with it. mjlab does not expose ``naccdmax``, hence this wrapper around the ``put_data`` call
+    in ``mjlab.sim.sim``. Overflowing the scratch is guarded: MuJoCo Warp prints "CCD overflow"
+    and drops that contact.
+    """
+    global _CCD_PER_WORLD
+    import mjlab.sim.sim as sim
+
+    if _CCD_PER_WORLD is None:
+        put_data = sim.mjwarp.put_data
+
+        def _put_data(*args, **kwargs):
+            kwargs.setdefault("naccdmax", _CCD_PER_WORLD * kwargs["nworld"])
+            return put_data(*args, **kwargs)
+
+        sim.mjwarp.put_data = _put_data
+    _CCD_PER_WORLD = per_world

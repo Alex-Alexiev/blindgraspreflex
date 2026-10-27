@@ -19,6 +19,9 @@ dependencies = [
 [project.optional-dependencies]
 cu128 = ["mjlab[cu128]"]
 cpu = ["mjlab[cpu]"]
+# The SAPG trainer (blindgraspreflex.training.sapg) runs the rl_games fork fetched by
+# scripts/fetch_rl_games.sh; these are that fork's runtime imports.
+sapg = ["gym==0.26.2", "omegaconf>=2.3", "tensorboardx>=2.6"]
 dev = [
     "pytest>=8.3",
     "ruff>=0.9",

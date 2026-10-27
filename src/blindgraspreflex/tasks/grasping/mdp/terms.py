@@ -14,8 +14,8 @@ Two link sets, deliberately different
 
 The gate itself only counts a contact whose force pushes into the *inside* of the link. For
 the phalanges that is local +X (verified: +X dotted with the direction to the grasp centre is
-0.27-0.98 across the hand). For the palm it is local +Z, because the palm's +X is orthogonal
-to its inward direction by construction -- IsaacLab's uniform ``[1,0,0]`` does not transfer.
+0.27-0.98 across the hand). For the palm it is also local +X, the palm face: the fingers flex
+toward it, and the palm's +Z runs from the wrist to the knuckles.
 
 Improvement rewards
 -------------------
@@ -123,10 +123,8 @@ class HandContacts:
         if any(b < 0 for b in self.reward_body_ids):
             raise ValueError("Reward contact links missing from the model.")
         self.reward_index = {i: k for k, i in enumerate(self.reward_body_ids)}
-        # Palm's inward direction is +Z (toward the fingertips); every phalanx's is +X.
-        self.inward_local = np.array(
-            [[0.0, 0.0, 1.0] if n == "palm" else [1.0, 0.0, 0.0] for n in REWARD_CONTACT_LINKS]
-        )
+        # Every reward link's inward direction is local +X: the palm face and the finger pads.
+        self.inward_local = np.array([[1.0, 0.0, 0.0]] * len(REWARD_CONTACT_LINKS))
 
     def compute(self, model: mujoco.MjModel, data: mujoco.MjData) -> tuple[np.ndarray, np.ndarray]:
         """Return (obs_binary (21,), reward_binary (16,)) for one env."""
@@ -151,11 +149,12 @@ class HandContacts:
             if link in self.reward_index:
                 k = self.reward_index[link]
                 if self.use_inward_gate:
-                    # contact frame row 0 is the normal, pointing from geom1 to geom2.
+                    # contact frame row 0 is the normal, pointing from geom1 to geom2, so
+                    # normal_w points object->link. On the link's inside face it opposes inward.
                     frame = con.frame.reshape(3, 3)
                     normal_w = frame[0] * (1.0 if b1 == self.object_body else -1.0)
                     inward_w = data.xmat[link].reshape(3, 3) @ self.inward_local[k]
-                    if float(np.dot(normal_w, inward_w)) <= 0.0:
+                    if float(np.dot(normal_w, inward_w)) >= 0.0:
                         continue
                 rew[k] = True
         return obs, rew

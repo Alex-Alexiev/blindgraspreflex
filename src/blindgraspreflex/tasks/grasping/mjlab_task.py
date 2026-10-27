@@ -249,6 +249,9 @@ class GraspActionCfg(ActionTermCfg):
     """Damped-pseudoinverse regularisation lambda^2: qd = J^T (J J^T + lambda^2 I)^-1 twist."""
     qd_limit: float = 2.5
     """Per-joint velocity clamp [rad/s] on the pseudoinverse solution."""
+    twist_linear_limit: float = 0.35
+    twist_angular_limit: float = 2.0
+    """Maximum policy commanded palm linear [m/s] and angular [rad/s] velocities."""
     arm_kp: tuple[float, ...] | None = None
     arm_kd: tuple[float, ...] | None = None
     """Arm joint PD. None takes the SELECTED ARM's gains (``ARM.arm_kp`` / ``ARM.arm_kd``), which
@@ -516,6 +519,7 @@ class GraspAction(ActionTerm):
             "velocity",
             "pose_target",
             "pose_policy",
+            "twist_policy",
             "joint_target",
             "joint_direct",
         ):
@@ -594,6 +598,14 @@ class GraspAction(ActionTerm):
         # _velocity_torque); differs in that the action is BOUNDED and squashed, because it comes
         # from a network rather than from a planner emitting physical units.
         self._pose_policy = self.cfg.arm_control == "pose_policy"
+        self._twist_policy = self.cfg.arm_control == "twist_policy"
+        if self._twist_policy and (
+            cfg.hand_mode != "joints" or cfg.hand_pca_project != 0.0 or cfg.reach_hand_pose
+        ):
+            raise ValueError(
+                "twist_policy requires 20 direct hand joints, no PCA projection, "
+                "and no reach-pose action block"
+            )
         if (self._pose_target or self._joint_direct) and self._hand_mode != "joints":
             raise ValueError(
                 f"arm_control={self.cfg.arm_control!r} commands joint angles; use hand_mode='joints'"
@@ -673,7 +685,7 @@ class GraspAction(ActionTerm):
             else 7
             if self._pose_target  # palm pos(3) + quat(4)
             else 6
-            if self._pose_policy  # palm pos(3) + rpy offset(3)
+            if self._pose_policy or self._twist_policy  # palm pose or twist (6)
             else (7 if self._use_residual else 1)
         )
         if self._pose_policy:
@@ -685,11 +697,13 @@ class GraspAction(ActionTerm):
             ).unsqueeze(0)
             self._pose_rpy_span = float(cfg.pose_rpy_span)
         self._raw = torch.zeros(env.num_envs, self._n_pre + self._num_hand_out, device=env.device)
+        if self._twist_policy:
+            self._palm_twist = torch.zeros(env.num_envs, 6, device=env.device)
 
         # Contact-gate buffers: body ids (entity-local, for body_link_quat_w) and per-link
         # inward axis, in REWARD_CONTACT_LINKS order. The inside-of-hand gate keeps only
-        # contacts whose normal opposes the link's inward face -- +Z for the palm (toward the
-        # fingers) and +X for the phalanges, the mjlab-frame directions verified in mdp.terms.
+        # contacts whose normal points into the link's inward face, local +X for the palm face
+        # and the phalanx pads (see reward_contact_frames).
         self._reward_body_ids, self._inward_local = reward_contact_frames(self._entity, env.device)
         # Hand velocity field. hand_target is the *commanded* pose the policy asked for; the
         # position target actually sent each physics step is rate-limited toward it so the
@@ -925,6 +939,8 @@ class GraspAction(ActionTerm):
         self.phase.reset(env_ids, site_pos, site_quat)
         self.impedance.set_target(site_pos, site_quat, env_ids)
         self._raw[env_ids] = 0.0
+        if self._twist_policy:
+            self._palm_twist[env_ids] = 0.0
         self.hand_target[env_ids] = self._q_open
         self._q_cmd[env_ids] = self._q_open
         self._hand_tau[env_ids] = 0.0
@@ -1025,6 +1041,13 @@ class GraspAction(ActionTerm):
         # keeps gradient and exploration alive across the whole real line.
         actions = torch.nan_to_num(actions, nan=0.0)
         self._raw[:] = actions
+        if self._twist_policy:
+            limits = actions.new_tensor(
+                [self.cfg.twist_linear_limit] * 3 + [self.cfg.twist_angular_limit] * 3
+            )
+            self._palm_twist = torch.tanh(actions[:, :6]) * limits
+            self.hand_target = self._decode_hand(actions[:, 6 : 6 + self._num_hand])
+            return
         if self._freeze_after_engage and self._bias_override is None:
             # Trigger on the TRUE palm-to-object distance. The phase's own `engaged` flag is
             # derived from the BIASED estimate and does not update at all when the policy drives
@@ -1225,14 +1248,19 @@ class GraspAction(ActionTerm):
             data.body_link_pos_w, data.body_link_quat_w, site_pos
         )  # (N, 6, 7), rows [lin; ang]
 
-        # Cartesian velocity field toward the phase target (position + orientation).
-        pos_err = self.impedance.target_pos - site_pos
-        e_pos = torch.linalg.norm(pos_err, dim=-1, keepdim=True).clamp(min=1e-9)
-        v_des = self._vf_speed(e_pos, p["vf_lin_speed"], p["vf_lin_eps"]) * (pos_err / e_pos)
-        rot_err = quat_to_rotvec(quat_mul(self.impedance.target_quat, quat_conjugate(site_quat)))
-        e_rot = torch.linalg.norm(rot_err, dim=-1, keepdim=True).clamp(min=1e-9)
-        w_des = self._vf_speed(e_rot, p["vf_ang_speed"], p["vf_ang_eps"]) * (rot_err / e_rot)
-        twist = torch.cat([v_des, w_des], dim=-1).unsqueeze(-1)  # (N, 6, 1)
+        if self._twist_policy:
+            twist = self._palm_twist.unsqueeze(-1)
+        else:
+            # Cartesian velocity field toward the phase target (position + orientation).
+            pos_err = self.impedance.target_pos - site_pos
+            e_pos = torch.linalg.norm(pos_err, dim=-1, keepdim=True).clamp(min=1e-9)
+            v_des = self._vf_speed(e_pos, p["vf_lin_speed"], p["vf_lin_eps"]) * (pos_err / e_pos)
+            rot_err = quat_to_rotvec(
+                quat_mul(self.impedance.target_quat, quat_conjugate(site_quat))
+            )
+            e_rot = torch.linalg.norm(rot_err, dim=-1, keepdim=True).clamp(min=1e-9)
+            w_des = self._vf_speed(e_rot, p["vf_ang_speed"], p["vf_ang_eps"]) * (rot_err / e_rot)
+            twist = torch.cat([v_des, w_des], dim=-1).unsqueeze(-1)  # (N, 6, 1)
 
         # Damped Jacobian (right) pseudoinverse: qd = J^T (J J^T + lambda^2 I)^-1 twist. The 6x6
         # solve is the minimum-norm joint velocity for the desired twist -- fast, batched, no QP.
@@ -1271,7 +1299,7 @@ class GraspAction(ActionTerm):
                 -self.impedance.effort_limit,
                 self.impedance.effort_limit,
             )
-        elif self.cfg.arm_control in ("velocity", "pose_target", "pose_policy"):
+        elif self.cfg.arm_control in ("velocity", "pose_target", "pose_policy", "twist_policy"):
             torque = self._velocity_torque(data)
         else:
             torque = self.impedance.compute(
@@ -1394,12 +1422,12 @@ def _contact_found(env, sensor_name: str) -> torch.Tensor:
     return found > 0
 
 
-# Sign of the inside-of-hand gate. A contact counts as "inside" when the contact normal
-# opposes the link's inward face, i.e. normal . inward < 0. The mjlab sensor normal points
-# primary->secondary (link->object), which is the negative of the object->link normal the
-# verified mdp.terms reference gates on -- hence the < 0. Confirmed empirically (a power grasp
-# on a ball classifies nearly all pad contacts as inside; see the smoke test).
-_INSIDE_ALIGN_MAX = 0.0
+# Sign of the inside-of-hand gate. The mjlab sensor normal points primary->secondary
+# (link->object), so a contact on a link's inside face has normal . inward > 0. Checked
+# 2026-10-22: the gate agrees with which side of the link the contact point lies on for 97.6%
+# of 2,667 hand-object contacts, against 2.7% for the earlier < 0, and a hand lowered back of
+# the palm first was called inside on 99% of palm contacts by that earlier sign.
+_INSIDE_ALIGN_MIN = 0.0
 
 
 def _contact_inside(
@@ -1425,7 +1453,7 @@ def _contact_inside(
     quat = env.scene["robot"].data.body_link_quat_w[:, term._reward_body_ids]  # (N, 16, 4)
     inward_w = quat_rotate(quat, term._inward_local.unsqueeze(0).expand_as(quat[..., :3]))
     aligns = (normal * inward_w).sum(dim=-1)
-    return found & (aligns < _INSIDE_ALIGN_MAX)
+    return found & (aligns > _INSIDE_ALIGN_MIN)
 
 
 def _min_step(best: torch.Tensor, error: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -2242,9 +2270,12 @@ def _hand_all_sensor_cfg() -> ContactSensorCfg:
 def reward_contact_frames(entity, device):
     """``(body_ids, inward_local)`` for :data:`REWARD_CONTACT_LINKS`, in that exact order.
 
-    The inside-of-hand contact gate keeps only contacts whose normal opposes the link's inward
-    face -- +Z for the palm (toward the fingers) and +X for the phalanges, the mjlab-frame
-    directions verified in mdp.terms. Both tensors are static geometry, not controller state,
+    The inside-of-hand contact gate keeps only contacts whose normal points into the link's
+    inward face: local +X for every reward link, the palm face and the finger pads. The fingers
+    flex toward palm +X (the middle fingertip moves from x = 0.015 to 0.072 m when it bends), and
+    the palm is 4.8 cm thick along X; its +Z runs from the wrist to the knuckles, which an
+    earlier version of this table used for the palm. Both tensors are static geometry, not
+    controller state,
     which is why any action term can supply them: :func:`_contact_inside` reads them off whatever
     term it is pointed at, so an alternative controller only has to expose these two attributes to
     reuse the contact reward.
@@ -2252,10 +2283,7 @@ def reward_contact_frames(entity, device):
     ids, _ = entity.find_bodies(list(REWARD_CONTACT_LINKS), preserve_order=True)
     return (
         torch.tensor(ids, device=device, dtype=torch.long),
-        torch.tensor(
-            [[0.0, 0.0, 1.0] if n == "palm" else [1.0, 0.0, 0.0] for n in REWARD_CONTACT_LINKS],
-            device=device,
-        ),
+        torch.tensor([[1.0, 0.0, 0.0]] * len(REWARD_CONTACT_LINKS), device=device),
     )
 
 
@@ -2932,6 +2960,10 @@ def register() -> None:
                     play_env_cfg=make_task(_objs, num_envs=len(_objs), source="graspxl"),
                     rl_cfg=grasp_ppo_cfg(),
                 )
+
+    from blindgraspreflex.tasks.grasping.clutter_task import register as register_clutter
+
+    register_clutter()
 
 
 ##
